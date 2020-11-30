@@ -1,0 +1,308 @@
+---
+title: "Fishery Collapse Final, Genna's Part"
+output: html_document
+---
+---
+output: github_document
+---
+
+```{r include = FALSE}
+knitr::opts_chunk$set(message = FALSE)
+
+```
+# Unit 3: Fisheries Collapse Module
+
+This module will focus on understanding and replicating 
+fisheries stock assessment data and fisheries collapse. 
+
+Instead of working with independent dataframes, we will be working with a large
+relational database which contains many different tables of different sizes and 
+shapes, but that all all related to eachother through a series of different ids.
+
+
+## The Database
+We will use data from the [RAM Legacy Stock Assessment Database](https://doi.org/10.5281/zenodo.2542918)
+
+First, load in the necessary libraries. Note that this time we need a package we 
+haven't used before `readxl`. This package is useful for reading in .xls or 
+.xlsx files. As always if you want more info on a package run `?readxl` after 
+loading it.
+
+```{r message = FALSE}
+library(tidyverse)
+library(readxl)
+
+install.packages("ramlegacy")
+
+library(ramlegacy)
+library(reshape2)
+```
+
+## Reading in the tables
+
+First thing, we need to download and unzip the files. Although we don't need 
+to do this step more than once, Travis will need this code to be able to reproduce our work successfully,
+unless we choose to push the datafiles up to git.
+
+```{r}
+download_ramlegacy(overwrite = TRUE)
+```
+Now we read the data into R. Big data here, so let's hope this does not crash our computer!
+```{r}
+ram <- ramlegacy::load_ramlegacy(tables = c("timeseries", "stock", "area", "tsmetrics"))
+```
+
+```{r}
+as_tibble(ram$timeseries)
+```
+
+Clean the data.  We create a unique "fish" dataframe here to streamline the ram$timeseries data that we organize through piping and the left_join function.  There are 951,775 observations in the RAM Stock assessment database!
+
+```{r}
+fish <- ram$timeseries %>% 
+  left_join(ram$stock, by = "stockid") %>% 
+  left_join(ram$tsmetrics, by = c("tsid" = "tsunique")) %>%
+  left_join(ram$area, by = "areaid")
+
+as_tibble(fish)
+```
+
+
+# Exercise 1: Investigating the North-Atlantic Cod
+
+Now we are ready to dive into our data.  First, We seek to replicate the following 
+figure from the Millenium Ecosystem Assessment Project using the RAM data. 
+
+![](http://espm-157.carlboettiger.info/img/cod.jpg)
+Our deliverable for Exercise 1 seeks to answer this question:
+**How does your graph compare to the one presented above?**
+
+The North Atlantic Cod graph above is from the Millenium Ecosystem Assessment.  The units used for this graph are in tons, so we seek to find a suitable metric in the RAM database that is also in tons.
+
+Below we see that there are 259 unique timeseries id's (labelled as tsid).  Although there is useful data available for biomass in metric tons (SSB-MT or spawning stock biomass in metric tons), the Millenium Ecosystem Assessment graph above mentions fish landings in tons, which we are inclined to compare to general total Catch data (the tscategory for tsid = TCbest-MT is described as "Catch or Landings" and units are specifically in Metric Tons, which is what we want).  
+
+```{r}
+as_tibble(fish %>%
+  distinct(tsid))
+```
+
+```{r}
+as_tibble(fish %>%
+  filter(tsid == "SSB-MT"))
+```
+
+When we filter for TCbest-MT, we see that General Total Catch (tslong) is measured in metric tons, which also considers landings, consistent with total landings tons units in the Millenium Ecosystem Assessment report.
+```{r}
+as_tibble(fish %>%
+  filter(tsid == "TCbest-MT"))
+```
+
+North Atlantic Cod has the scientific name Gadus morhua.  So we want to filter the fish dataframe for the North Atlantic Cod fish that has the TCbest-MT identification.
+```{r}
+as_tibble(fish %>% filter(scientificname == "Gadus morhua", tsid == "TCbest-MT")) 
+```
+
+Let's see if we can organize the 4,641 observations of the North Atlantic Cod by filtering the region, Canada East Coast. When exploring the table above it is clear that all the North Atlantic Cod fish are found in the Canada East Coast region.
+
+Let's see how many areas (in the Canada East Coast region) that these cod are in (that also have the TCbest-MT units)!
+```{r}
+fish %>% 
+  filter(region == "Canada East Coast", 
+                scientificname == "Gadus morhua") %>% count(tsid, areaid) %>% filter(tsid == "TCbest-MT")
+```
+Another way to get the same information:
+```{r}
+fish %>% filter(tsid == "TCbest-MT", 
+                region == "Canada East Coast", 
+                scientificname == "Gadus morhua") %>% count(areaid)
+```
+
+To see the Total Catch or Landings for the North American Cod by filtering for the TCbest-MT identification, we can find the values for each year, and then plot the data on a timeseries plot.  Let's first look at catch or landings information for the North Atlantic cod in a table:
+```{r}
+as_tibble(fish %>% 
+  filter(tsid == "TCbest-MT", region == "Canada East Coast") %>%
+  group_by(tsyear, scientificname) %>% 
+  summarise(total_catch = sum(tsvalue)) %>% 
+  filter(scientificname == "Gadus morhua"))
+```
+The above table shows TCbest-MT data for the North Atlantic Cod from 1850 to 2014. The data from 2008-2012 is missing.  The maximum value of the North Atlantic Cod catch/landings metric is observed in 1968, when the total_catch (sum of the tsvalues) is found to be 2.32 million metric tons.
+
+Now we can plot the North Atlantic Cod graph from the RAM database information and see how it compares with the Millenium Ecosystem Assessment!
+```{r}
+fish %>% 
+  filter(tsid == "TCbest-MT", region == "Canada East Coast") %>%
+  group_by(tsyear, scientificname) %>% 
+  summarise(total_catch = sum(tsvalue)) %>% 
+  filter(scientificname == "Gadus morhua") %>%
+ ggplot(aes(tsyear, total_catch)) + geom_line() +
+labs(x = "Year", y = "TCbest (metric tons)", title = "Gadis morhua, Total Catch or Landings")
+```
+![](http://espm-157.carlboettiger.info/img/cod.jpg)
+
+Compared to the Millenium Ecosystem Assessment, the RAM timeseries graph has the same shape but the RAM timeseries seems to have about 1.5 million more metric tons observed for the max value in the year 1968.  This may be due to the fact that the TCbest data included catch or landings, while the Millenium Ecosystem Assessment seems to only measure the Fish landings in tons.
+
+Overall, the shape of the graphs look very similar!
+
+Also it is useful to consider that there are different regions where the North Atlantic Cod are found, so although the overall trend in Total Catch or Landings of the species follows the same general trend of the Millenium Ecosystem Assessment, the plot of Total Catch or Landings over time is unique when organizing the TCbest-MT metrics based on different regions.
+```{r}
+fish %>% 
+  filter(tsid == "TCbest-MT", region == "Canada East Coast") %>%
+  group_by(tsyear, scientificname, areaid) %>% 
+  summarise(total_catch = sum(tsvalue, na.rm=TRUE)) %>% 
+  filter(scientificname == "Gadus morhua") %>%
+  ggplot(aes(tsyear, total_catch, col = areaid)) + 
+  geom_line() + facet_wrap(~areaid, scales = "free") + ggtitle("North Atlantic Cod timeseries with different Areaids")
+```
+
+In all of the plots above for the timeseries of total_catch observed in different regions, it appears that there is currently a collapse in all of the cases! We will be exploring the implications of fishery collapse in preparation for and throughout Exercise 2.
+
+##Some work leading up to Exercise 2:
+
+We learn below that there are 24 region identifications in the RAM Legacy Stock Assessment database.
+
+The regions are as follows: Australia, US Alaska (Pacific Salmon), US Alaska, Europe non EU, US East Coast, Antarctic, Indian Ocean, Mediterranean-Black Sea, Other (Anchovy kilka is the commonname for a species found in this region and the areaname for this category is Iranian Caspian Sea), Canada East Coast, Canada West Coast, Canada West Coast (Pacific Salmon), Russia Japan, Russia Japan (Pacific Salmon), West Africa, South Africa, European Union, Pacific Ocean, Atlantic Ocean, South America, New Zealand, US West Coast, US Southeast and Gulf, and US West Coast (Pacific Salmon).
+```{r}
+
+count_regions <- fish[!duplicated(fish$region), ]
+
+as_tibble(count_regions)
+```
+
+```{r}
+fish %>%
+  count(region)
+```
+
+
+Based on common names, we find there are 393-97 different types of fish in the RAM legacy database.
+
+```{r}
+as_tibble(fish %>% count(commonname, scientificname))
+```
+
+```{r}
+as_tibble(fish %>%
+  count(commonname))
+```
+According to the above data, we can see that there are 2,722 instances where American Lobster is observed in the database throughout the RAM timeseries.  To find the regions for this data, the following code tells us that America lobster is found in two regions over the years, the Canada East Coast and US East Coast.
+```{r}
+as_tibble(fish %>% 
+  filter(commonname == "American lobster") %>%
+  count(region, tsid = "TCbest-MT"))
+```
+Now let's play around with useful ways to organize our data.
+```{r}
+as_tibble(American_lobster_total_catch <- fish %>% 
+  filter(commonname == "American lobster") %>%
+  count(region, tsid = "TCbest-MT", tsvalue))
+```
+1,144 rows.  That is still a lot of data!
+
+```{r}
+American_lobster_tsvalue <- fish %>%
+filter(commonname == "American lobster") %>%
+  count(tsyear, region, areaid, tsid = "TCbest-MT", tsvalue)
+as_tibble(American_lobster_tsvalue)
+```
+Now there are 1,705 rows which is overwhelming.  Can we look more closely at aggregate data and unique data?
+
+```{r}
+as_tibble(fish %>% 
+  filter(tsid == "TCbest-MT", region == "Canada East Coast") %>%
+  group_by(tsyear, scientificname) %>% 
+  summarise(Canada_East_Coast_TCbest_MT = sum(tsvalue)) %>% 
+  filter(scientificname == "Homarus americanus"))
+```
+In the Canada East Coast region, the first Total Catch or Landings data that is observed for American Lobster is in 1892 at 16,800 metric tons. In 2011, there are 56,971 metric tons of catch/landings for the species.  We see a large increase in the amount of species caught over a more than a century time period. Even if this species collapses or decreases in tonnage over the 100-year period, it is certainly not collapsed in 2011.
+```{r}
+fish %>% 
+  filter(tsid == "TCbest-MT", region == "US East Coast") %>%
+  group_by(tsyear, scientificname) %>% 
+  summarise(US_East_Coast_TCbest_MT = sum(tsvalue)) %>% 
+  filter(scientificname == "Homarus americanus")
+```
+The US East Coast region did not have any Total Catch or Landings observations for the American Lobster (Homarus americanus) until tsyear, 1981, when there were 17,810 metric tons of American Lobster identified in the RAM Legacy Stock Assessment database.  The last measurement for American Lobster observed on the US East Coast region for Total Catch or Landings observations is in 2007 at 37,200 metric tons of American Lobster. This means that there is a doubling in Catch/Landings in a 26 year period, and so this stock would not be considered currently collapsed.  In fact it shows an increasing trend!
+
+
+```{r}
+as_tibble(fish %>%
+  count(tsyear, commonname = "American lobster", tsid = "TCbest-MT", sum(tsvalue)))
+```
+
+The "n" column below  tells us the number of catch or landings observations for the American Lobster in each region.  We see that there is a larger observation size for the Canada East Coast region than for the US East Coast region, which is consistent with the amount of data characterized in the above tables we created.
+```{r}
+as_tibble(fish %>% 
+  filter(commonname == "American lobster") %>%
+  count(region, tsid = "TCbest-MT"))
+```
+
+Moving on, let's see what variables in the RAM database may be useful in understanding species observations.  Let's explore the stocklong.x variable
+  
+```{r}
+as_tibble(fish %>%
+  count(stocklong.x))
+```
+There are 1,373 unique stocklong.x's, each with a unique group size, "n", which represents the number of observations for each unique stocklong.x.
+
+Now let's explore some other species besides the North Atlantic Cod and the American Lobster by taking a tour around the world! Below we explore the Xiphias gladius species in the Mediterranean-Black Sea region:
+
+```{r}
+fish %>% 
+  filter(tsid == "TBbest-MT", region == "Mediterranean-Black Sea") %>%
+  group_by(tsyear, scientificname, areaid) %>% 
+  summarise(total_catch = sum(tsvalue, na.rm=TRUE)) %>% 
+  filter(scientificname == "Xiphias gladius") %>%
+  ggplot(aes(tsyear, total_catch, col = areaid)) + 
+  geom_line() + facet_wrap(~areaid, scales = "free") + ggtitle("Xiphias gladius in the Mediterranean-Black Sea")
+```
+It looks like this species, Xiphias gladius, has collapsed over time after much overfishing in the mid 1980s, and is currently collapsed!
+
+Now let's look at another species in the Mediterranean-Black Sea region, over various areaids within the region.  Let's look closely at Engraulis encrasicolus:
+
+```{r}
+fish %>% 
+  filter(tsid == "TCbest-MT", region == "Mediterranean-Black Sea") %>%
+  group_by(tsyear, scientificname, areaid) %>% 
+  summarise(total_catch = sum(tsvalue, na.rm=TRUE)) %>% 
+  filter(scientificname == "Engraulis encrasicolus") %>%
+  ggplot(aes(tsyear, total_catch, col = areaid)) + 
+  geom_line() + facet_wrap(~areaid, scales = "free") + ggtitle("Engraulis encrasicolus Catch or Landings in Mediterranean-Black Sea Region")
+```
+
+Let's try one more species in the Mediterranean-Black Sea region, the Psetta maxima species!
+```{r}
+fish %>% 
+  filter(tsid == "TCbest-MT", region == "Mediterranean-Black Sea") %>%
+  group_by(tsyear, scientificname, areaid) %>% 
+  summarise(total_catch = sum(tsvalue, na.rm=TRUE)) %>% 
+  filter(scientificname == "Psetta maxima") %>%
+  ggplot(aes(tsyear, total_catch, col = areaid)) + 
+  geom_line() + facet_wrap(~areaid, scales = "free") +  ggtitle("Psetta maixma Catch or Landings in the Mediterranean-Black Sea Region")
+```
+The Psetta maxima appears to currently be a collapsed taxa in the Mediterranean-Black Sea region.
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

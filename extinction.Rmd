@@ -242,4 +242,231 @@ create_df <- function(resp) {
 lis <- c(resp_pg0, resp_pg1, resp_pg2, resp_pg3, resp_pg4, resp_pg5, resp_pg6, resp_pg7, resp_pg8, resp_pg9, resp_pg10, resp_pg11, resp_pg12)
 ```
 
+blah blah blahh
+Code from before 11.30 before I pulled Luanne's update from GitHub
+---
+title: "Extinctions Unit"
+author: "Genna Fudin, Athena Sabaria, Luanne Yang"
+maketitle: true
+output: github_document
+---
+
+
+```{r include=FALSE}
+library("tidyverse")
+library("httr")
+library("jsonlite")
+library("stringr")
+#library("printr")
+knitr::opts_chunk$set(comment=NA)
+```
+
+
+
+## Extinctions Module
+
+_Are we experiencing the sixth great extinction?_  
+
+What is the current pace of extinction? Is it accelerating? How does it compare to background extinction rates?
+
+## Background
+
+- [Section Intro Video](https://youtu.be/QsH6ytm89GI)
+- [Ceballos et al (2015)](http://doi.org/10.1126/sciadv.1400253)
+
+Our focal task will be to reproduce the result from Ceballos and colleagues showing the recent increase in extinction rates relative to the background rate:
+
+![](https://espm-157.carlboettiger.info/img/extinctions.jpg)
+
+
+## Computational Topics
+
+- Accessing data from a RESTful API
+- Error handling
+- JSON data format
+- Regular expressions
+- Working with missing values
+
+## Additional references:
+
+- http://www.hhmi.org/biointeractive/biodiversity-age-humans (Video)
+- [Barnosky et al. (2011)](http://doi.org/10.1038/nature09678)
+- [Pimm et al (2014)](http://doi.org/10.1126/science.1246752)
+- [Sandom et al (2014)](http://dx.doi.org/10.1098/rspb.2013.3254)
+
+
+```{r}
+base_url <- "https://apiv3.iucnredlist.org"
+endpoint <- "/api/v3/species/page/"
+page_number <- 0:12
+args <- "?token="
+token <- "9bb4facb6d23f48efbf424bb05c0c1ef1cf6f468393bc745d42179ac4aca5fee"
+query <- paste0(base_url, endpoint, page_number, args, token)
+```
+
+
+```{r}
+for (i in 1:13){
+  resp <- paste("resp_pg", i-1, sep = "")
+  assign(resp, GET(query[i]))
+}
+```
+
+```{r}
+m <- map(query, GET)
+```
+
+
+```{r}
+create_df <- function(resp) {
+  txt <- content(resp, as = "parsed")
+  all_sci_names <- 
+    purrr::map_dfr(txt$result, 
+                 function(x) 
+                   data.frame(sci_name = x$scientific_name,
+                              kingdom = x$kingdom_name)
+                 )
+  return(all_sci_names)
+}
+
+
+# lis <- c()
+# for(i in 0:12) {
+#   resp <- paste("resp_pg", i, sep = "")
+#   lis <- c(lis, resp)
+# }
+
+lis <- c(resp_pg0, resp_pg1, resp_pg2, resp_pg3, resp_pg4, resp_pg5, resp_pg6, resp_pg7, resp_pg8, resp_pg9, resp_pg10, resp_pg11, resp_pg12)
+```
+
+```{r}
+#livecode all below
+resp <- map(query, GET)
+```
+
+```{r}
+status <- map_int(resp, status_code)
+good <- resp[status==200]
+try_again <- map(query[status != 200], GET)
+good <- c(good, try_again)
+```
+
+```{r}
+txts <- map(good, content, as = "parsed")
+```
+
+```{r}
+rectangle_me <- function(x) as_tibble(compact(x))
+stack_txt <- function(txt) map_dfr(txt$result, rectangle_me) 
+all_sci_names <- map_dfr(txts, stack_txt)
+all_sci_names
+```
+
+```{r}
+##from Luanne/Athena's code
+##birds <- all_sci_names %>% select(class_name == "AVES")
+##vert <- all_sci_names %>% select(class_name != "AVES")
+```
+
+extinct_m <- all_sci_names %>% filter(category == "EX", class_name == 'MAMMALIA') %>% arrange(scientific_name)
+name_m <- extinct_m$scientific_name
+url <- paste0(base_url, "/api/v3/species/narrative/", name_m, args, token)
+resp2 <- map(url, GET)
+narrative <- map(resp2, content, as = "parsed")
+get_rationale <- function(x) x$result[[1]]$rationale
+safe_get <- safely(get_rationale, otherwise = "")
+rationale_txt <- map(narrative, safe_get)
+```
+
+years <- stringr::str_match_all(rationale_txt, "(\\d{2})\\d{2}")
+all(years[1][[1]][,2] == '19')
+
+
+
+
+```{r}
+extinct <- all_sci_names %>% filter(category == "EX") %>% arrange(scientific_name)
+name <- extinct$scientific_name[1:919]
+url <- paste0(base_url, "/api/v3/species/narrative/", name, args, token)
+resp2 <- map(url, GET)
+narrative <- map(resp2, content, as = "parsed")
+get_rationale <- function(x) x$result[[1]]$rationale
+safe_get <- safely(get_rationale, otherwise = "")
+rationale_txt <- map(narrative, safe_get)
+#rationale_txt <- map(narrative, get_rationale) 
+```
+
+
+
+```{r}
+# rando <- c()
+# for (i in 1:13){
+#   name <- extinct$scientific_name[[i]]
+#   url <- paste0(base_url, "/api/v3/species/narrative/", name, args, token)
+#   x <- url %>% GET() %>% content()
+#   rationale <- x$result[[1]]$rationale
+#   rando <- c(rando, rationale)
+# }
+# 
+# stringr::str_extract(rando, "\\d+")
+```
+
+From 11.18
+Carl's Live Code
+```{r}
+download.file("https://github.com/espm-157/extinction-template/releases/download/data/resp2.rds", "resp2.rds")
+```
+
+```{r}
+resp2 <- readRDS("resp2.rds")
+```
+
+
+```{r}
+status <- map_int(resp2, status_code)
+all(status == 200)
+narrative <- map(resp2, content)
+names <- map(narrative, "name")
+missing <- map_lgl(names, is.null)
+good_names <- names[!missing]
+good_narrative <- narrative[!missing]
+result <- map(good_narrative, "result")
+result1 <- map(result, function(x) x[[1]])
+rationale <- map(result1, "rationale")
+missing_rationale <- map_lgl(rationale, is.null)
+complete_narrative <- good_narrative[!missing_rationale]
+complete_rationale <- rationale[!missing_rationale]
+complete_names <- good_names[!missing_rationale]
+narrative_df <- tibble(scientific_name = as.character(complete_names),
+                       rationale = as.character(complete_rationale))
+sum(missing_rationale)
+```
+
+```{r}
+narrative_final <- narrative_df %>% 
+  left_join(extinct) %>% 
+  mutate(date = stringr::str_extract(rationale, "\\d{4}"),
+         century = stringr::str_extract(date, "\\d{2}"))
+```
+## Creating a new column for the y-axis on graph (cumulative value)
+```{r}
+year_bin <- c("1500-1600", "1600-1700", "1700-1800", "1800-1900", "1900-2014")
+```
+
+Change column date into integer columm
+Cut function?
+
+```{r}
+narrative_final$date <- as.numeric(as.character(narrative_final$date))
+```
+
+as_int
+
+Mammals, birds, vertebrates, other vertebrates
+
+
+## Add 1 to centuries
+```{r}
+ggplot(data = narrative_df, aes(x = "Century", y = ))
+```
 
